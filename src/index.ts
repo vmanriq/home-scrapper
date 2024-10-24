@@ -30,7 +30,7 @@ const readDataStore = (): DataStore => {
 
 const initBrowser = async () => {
   const browser = await pupeteer.launch({
-    headless: false,
+    headless: true,
     args: ["--no-sandbox", "--disable-setuid-sandbox"],
   });
   return browser;
@@ -98,9 +98,9 @@ const retrieveSpecs = async (
 
   const maintenanceFee = regexMaintenanceFee ? regexMaintenanceFee[1] : null;
 
-  const areaOfTheHouse = await specs[0].evaluate((a) => a.textContent);
-  const numberOfDorms = await specs[1].evaluate((a) => a.textContent);
-  const numberOfBatrhooms = await specs[2].evaluate((a) => a.textContent);
+  const areaOfTheHouse = await specs?.[0]?.evaluate((a) => a.textContent);
+  const numberOfDorms = await specs?.[1]?.evaluate((a) => a.textContent);
+  const numberOfBatrhooms = await specs?.[2]?.evaluate((a) => a.textContent);
 
   return {
     numberOfBatrhooms,
@@ -207,7 +207,7 @@ const processSearchHousesByChat = async (
     allHousesLinkData.push(...housesFromLink);
   }
 
-  const chunkedData = chunkArray(allHousesLinkData, 5);
+  const chunkedData = chunkArray(allHousesLinkData, 1);
 
   for (const chunk of chunkedData) {
     await sendMessageToTelegram(chatId, chunk);
