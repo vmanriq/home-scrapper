@@ -195,7 +195,8 @@ const retrieveHousesDataFromFilterLink = async (
   await page.close();
   return housesData.filter(
     (house) =>
-      parseInt(house.rentPrice ?? "0") + parseInt(house.maintenanceFee ?? "0") <
+      parseInt(house.rentPrice ?? "0") +
+        parseInt(house.maintenanceFee?.replace(/\./g, "") ?? "0") <
       searchConfig.maxPrice,
   );
 };
