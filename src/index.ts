@@ -56,7 +56,7 @@ const formatMessage = (dataMessage: HouseData[]) => {
         \n 🛏️ ${a.numberOfDorms}
         \n 🚽 ${a.numberOfBathrooms} 
         \n 📏 ${a.areaOfTHeHouse} 
-        \n 💰 ${a.rentPrice} 
+        \n 💰 ${parseInt(a.rentPrice ?? "").toLocaleString("es-CL", { style: "currency", currency: "CLP" })} 
         \n 📰 (gc) ${a.maintenanceFee}
         \n 🔗 ${a.url}`,
     )
