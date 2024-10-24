@@ -7,7 +7,7 @@ interface HouseData {
   maintenanceFee: string | null;
   areaOfTHeHouse: string | null;
   numberOfDorms: string | null;
-  numberOfBatrhooms: string | null;
+  numberOfBathrooms: string | null;
   rentPrice: string | null;
   description: string | null;
 }
@@ -16,12 +16,15 @@ interface DataStore {
   [groupId: string]: {
     searchLinks: string[];
     alreadySeenHouses: { [houseUrl: string]: boolean };
+    maxPrice: number;
   };
 }
 
 require("dotenv").config();
 
 const API_KEY = process.env.TELEGRAM_API_KEY;
+const CHUNK_SIZE = parseInt(process.env.CHUNK_SIZE ?? "1");
+const UF_VALUE = parseInt(process.env.UF_VALUE ?? "38000");
 
 const readDataStore = (): DataStore => {
   const data = fs.readFileSync("dataStore.json", "utf8");
@@ -51,7 +54,7 @@ const formatMessage = (dataMessage: HouseData[]) => {
       (a) =>
         ` 🏠 ${a.description}
         \n 🛏️ ${a.numberOfDorms}
-        \n 🚽 ${a.numberOfBatrhooms} 
+        \n 🚽 ${a.numberOfBathrooms} 
         \n 📏 ${a.areaOfTHeHouse} 
         \n 💰 ${a.rentPrice} 
         \n 📰 (gc) ${a.maintenanceFee}
@@ -79,7 +82,7 @@ const sendMessageToTelegram = async (
 const retrieveSpecs = async (
   housePage: pupeteer.Page,
 ): Promise<{
-  numberOfBatrhooms: string | null;
+  numberOfBathrooms: string | null;
   areaOfTheHouse: string | null;
   numberOfDorms: string | null;
   maintenanceFee: string | null;
@@ -100,14 +103,19 @@ const retrieveSpecs = async (
 
   const areaOfTheHouse = await specs?.[0]?.evaluate((a) => a.textContent);
   const numberOfDorms = await specs?.[1]?.evaluate((a) => a.textContent);
-  const numberOfBatrhooms = await specs?.[2]?.evaluate((a) => a.textContent);
+  const numberOfBathrooms = await specs?.[2]?.evaluate((a) => a.textContent);
 
   return {
-    numberOfBatrhooms,
+    numberOfBathrooms,
     areaOfTheHouse,
     numberOfDorms,
     maintenanceFee,
   };
+};
+
+const convertIntoClp = (rawPrice: string, unitPrice: string) => {
+  const price = rawPrice.replace(/\./g, "");
+  return unitPrice === "UF" ? parseInt(price) * UF_VALUE : parseInt(price);
 };
 
 const retrieveHouseCardInfo = async (
@@ -115,57 +123,65 @@ const retrieveHouseCardInfo = async (
   houseCard: pupeteer.ElementHandle,
   alreadySeenHouses: { [houseUrl: string]: boolean },
 ): Promise<HouseData | null> => {
-  const rawUrl =
-    (await houseCard.$("a").then((a) => a?.evaluate((a) => a.href))) ?? "";
-  const url = rawUrl.split("#")[0];
-  const isHouseAlreadySeen = alreadySeenHouses[url ?? ""];
-  console.log(url, isHouseAlreadySeen);
-  if (!url || isHouseAlreadySeen) {
-    console.log("Unable to retrieve house url or house already seen");
+  try {
+    const rawUrl =
+      (await houseCard.$("a").then((a) => a?.evaluate((a) => a.href))) ?? "";
+    const url = rawUrl.split("#")[0];
+    const isHouseAlreadySeen = alreadySeenHouses[url ?? ""];
+    console.log(url, isHouseAlreadySeen);
+    if (!url || isHouseAlreadySeen) {
+      console.log("Unable to retrieve house url or house already seen");
+      return null;
+    }
+    const housePage = await browser.newPage();
+    await housePage.goto(url);
+
+    const price = await housePage
+      .$(".andes-money-amount__fraction")
+      .then((a) => a?.evaluate((a) => a.textContent));
+
+    const unitPrice =
+      (await housePage
+        .$(".andes-money-amount__currency-symbol")
+        .then((a) => a?.evaluate((a) => a.textContent))) ?? "";
+
+    const description = await housePage
+      .$(".ui-pdp-title")
+      .then((a) => a?.evaluate((a) => a.textContent));
+
+    const { numberOfBathrooms, areaOfTheHouse, numberOfDorms, maintenanceFee } =
+      await retrieveSpecs(housePage);
+
+    const priceInClp = convertIntoClp(price ?? "0", unitPrice);
+
+    await housePage.close();
+
+    return {
+      url,
+      areaOfTHeHouse: areaOfTheHouse ? areaOfTheHouse : null,
+      numberOfDorms: numberOfDorms ? numberOfDorms : null,
+      numberOfBathrooms,
+      rentPrice: price ? `${priceInClp}` : null,
+      description: description ? description : null,
+      maintenanceFee,
+    };
+  } catch (e) {
+    console.log("Error while retrieving house data", e);
     return null;
   }
-  const housePage = await browser.newPage();
-  await housePage.goto(url);
-
-  const price = await housePage
-    .$(".andes-money-amount__fraction")
-    .then((a) => a?.evaluate((a) => a.textContent));
-
-  const unitPrice =
-    (await housePage
-      .$(".andes-money-amount__currency-symbol")
-      .then((a) => a?.evaluate((a) => a.textContent))) ?? "";
-
-  const description = await housePage
-    .$(".ui-pdp-title")
-    .then((a) => a?.evaluate((a) => a.textContent));
-
-  const { numberOfBatrhooms, areaOfTheHouse, numberOfDorms, maintenanceFee } =
-    await retrieveSpecs(housePage);
-
-  await housePage.close();
-
-  return {
-    url,
-    areaOfTHeHouse: areaOfTheHouse ? areaOfTheHouse : null,
-    numberOfDorms: numberOfDorms ? numberOfDorms : null,
-    numberOfBatrhooms,
-    rentPrice: price ? `${unitPrice} ${price}` : null,
-    description: description ? description : null,
-    maintenanceFee,
-  };
 };
 
 const retrieveHousesDataFromFilterLink = async (
   browser: pupeteer.Browser,
   url: string,
   alreadySeenHouses: { [houseUrl: string]: boolean },
+  searchConfig: DataStore["groupId"],
 ) => {
   const page = await browser.newPage();
   await page.goto(url);
   const housesData: HouseData[] = [];
 
-  //we only get the first page becaouse paja
+  //we only get the first page because paja
   const allHouseCards = await page.$$(".andes-card");
   for (const houseCard of allHouseCards) {
     const houseData = await retrieveHouseCardInfo(
@@ -177,7 +193,11 @@ const retrieveHousesDataFromFilterLink = async (
     housesData.push(houseData);
   }
   await page.close();
-  return housesData;
+  return housesData.filter(
+    (house) =>
+      parseInt(house.rentPrice ?? "0") + parseInt(house.maintenanceFee ?? "0") <
+      searchConfig.maxPrice,
+  );
 };
 
 const chunkArray = (array: any[], chunkSize: number) => {
@@ -190,10 +210,10 @@ const chunkArray = (array: any[], chunkSize: number) => {
 
 const processSearchHousesByChat = async (
   chatId: string,
-  chatConfig: DataStore["groupId"],
+  searchConfig: DataStore["groupId"],
 ) => {
-  const seachLinks = chatConfig.searchLinks;
-  const alreadySeenHouses = chatConfig.alreadySeenHouses;
+  const seachLinks = searchConfig.searchLinks;
+  const alreadySeenHouses = searchConfig.alreadySeenHouses;
 
   const browser = await initBrowser();
   const allHousesLinkData: HouseData[] = [];
@@ -203,11 +223,12 @@ const processSearchHousesByChat = async (
       browser,
       houseLink,
       alreadySeenHouses,
+      searchConfig,
     );
     allHousesLinkData.push(...housesFromLink);
   }
 
-  const chunkedData = chunkArray(allHousesLinkData, 1);
+  const chunkedData = chunkArray(allHousesLinkData, CHUNK_SIZE);
 
   for (const chunk of chunkedData) {
     await sendMessageToTelegram(chatId, chunk);
